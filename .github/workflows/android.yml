@@ -26,9 +26,10 @@ jobs:
       - name: Create Android project
         run: flutter create --platforms=android .
 
-      - name: Configure Firebase Android
+      - name: Configure Android MainActivity and Firebase
         run: |
           mkdir -p android/app
+
           cp google-services.json android/app/google-services.json
 
           python3 - <<'PY'
@@ -39,6 +40,7 @@ jobs:
           package_id = "com.quicknatham.app"
 
           data = json.loads(Path("google-services.json").read_text())
+
           firebase_package = data["client"][0]["client_info"]["android_client_info"]["package_name"]
 
           if firebase_package != package_id:
@@ -52,19 +54,26 @@ jobs:
           if settings_kts.exists() and app_kts.exists():
               settings = settings_kts
               app = app_kts
+
               plugin_settings = '    id("com.google.gms.google-services") version "4.4.2" apply false'
               plugin_app = '    id("com.google.gms.google-services")'
+
               namespace_pattern = r'namespace\s*=\s*"[^"]+"'
               appid_pattern = r'applicationId\s*=\s*"[^"]+"'
+
               namespace_value = f'namespace = "{package_id}"'
               appid_value = f'applicationId = "{package_id}"'
+
           else:
               settings = Path("android/settings.gradle")
               app = Path("android/app/build.gradle")
+
               plugin_settings = "    id 'com.google.gms.google-services' version '4.4.2' apply false"
               plugin_app = "    id 'com.google.gms.google-services'"
+
               namespace_pattern = r'namespace\s+["\'][^"\']+["\']'
               appid_pattern = r'applicationId\s+["\'][^"\']+["\']'
+
               namespace_value = f"namespace '{package_id}'"
               appid_value = f"applicationId '{package_id}'"
 
@@ -72,22 +81,60 @@ jobs:
           a = app.read_text()
 
           if "com.google.gms.google-services" not in s:
-              s = s.replace("plugins {", "plugins {\n" + plugin_settings, 1)
+              s = s.replace(
+                  "plugins {",
+                  "plugins {\n" + plugin_settings,
+                  1
+              )
 
           if "com.google.gms.google-services" not in a:
-              a = a.replace("plugins {", "plugins {\n" + plugin_app, 1)
+              a = a.replace(
+                  "plugins {",
+                  "plugins {\n" + plugin_app,
+                  1
+              )
 
           a, n1 = re.subn(namespace_pattern, namespace_value, a, count=1)
           a, n2 = re.subn(appid_pattern, appid_value, a, count=1)
 
           if n1 != 1 or n2 != 1:
-              raise SystemExit("Could not set Android namespace/applicationId")
+              raise SystemExit(
+                  "Could not set Android namespace/applicationId"
+              )
 
           settings.write_text(s)
           app.write_text(a)
 
+          # Create MainActivity in the exact package Android expects.
+          main_activity = Path(
+              "android/app/src/main/kotlin/com/quicknatham/app/MainActivity.kt"
+          )
+
+          main_activity.parent.mkdir(parents=True, exist_ok=True)
+
+          main_activity.write_text(
+              "package com.quicknatham.app\n\n"
+              "import io.flutter.embedding.android.FlutterActivity\n\n"
+              "class MainActivity : FlutterActivity()\n"
+          )
+
+          # Verify Android Manifest points to MainActivity.
+          manifest = Path("android/app/src/main/AndroidManifest.xml")
+
+          if not manifest.exists():
+              raise SystemExit("AndroidManifest.xml not found")
+
+          manifest_text = manifest.read_text()
+
+          if "MainActivity" not in manifest_text:
+              raise SystemExit(
+                  "MainActivity declaration missing in AndroidManifest.xml"
+              )
+
           print("Firebase package:", firebase_package)
           print("Android package:", package_id)
+          print("MainActivity created:", main_activity)
+          print("Android Manifest verified")
           PY
 
       - name: Install dependencies
