@@ -30,44 +30,64 @@ jobs:
         run: |
           mkdir -p android/app
           cp google-services.json android/app/google-services.json
+
           python3 - <<'PY'
+          import json
+          import re
           from pathlib import Path
 
-          settings = Path("android/settings.gradle.kts")
-          app = Path("android/app/build.gradle.kts")
+          package_id = "com.quicknatham.app"
 
-          if settings.exists() and app.exists():
-              s = settings.read_text()
-              a = app.read_text()
-              s = s.replace(
-                  "plugins {",
-                  'plugins {\n    id("com.google.gms.google-services") version "4.4.2" apply false',
-                  1
+          data = json.loads(Path("google-services.json").read_text())
+          firebase_package = data["client"][0]["client_info"]["android_client_info"]["package_name"]
+
+          if firebase_package != package_id:
+              raise SystemExit(
+                  f"Firebase package mismatch: {firebase_package} != {package_id}"
               )
-              a = a.replace(
-                  "plugins {",
-                  'plugins {\n    id("com.google.gms.google-services")',
-                  1
-              )
-              settings.write_text(s)
-              app.write_text(a)
+
+          settings_kts = Path("android/settings.gradle.kts")
+          app_kts = Path("android/app/build.gradle.kts")
+
+          if settings_kts.exists() and app_kts.exists():
+              settings = settings_kts
+              app = app_kts
+              plugin_settings = '    id("com.google.gms.google-services") version "4.4.2" apply false'
+              plugin_app = '    id("com.google.gms.google-services")'
+              namespace_pattern = r'namespace\s*=\s*"[^"]+"'
+              appid_pattern = r'applicationId\s*=\s*"[^"]+"'
+              namespace_value = f'namespace = "{package_id}"'
+              appid_value = f'applicationId = "{package_id}"'
           else:
               settings = Path("android/settings.gradle")
               app = Path("android/app/build.gradle")
-              s = settings.read_text()
-              a = app.read_text()
-              s = s.replace(
-                  "plugins {",
-                  "plugins {\n    id 'com.google.gms.google-services' version '4.4.2' apply false",
-                  1
-              )
-              a = a.replace(
-                  "plugins {",
-                  "plugins {\n    id 'com.google.gms.google-services'",
-                  1
-              )
-              settings.write_text(s)
-              app.write_text(a)
+              plugin_settings = "    id 'com.google.gms.google-services' version '4.4.2' apply false"
+              plugin_app = "    id 'com.google.gms.google-services'"
+              namespace_pattern = r'namespace\s+["\'][^"\']+["\']'
+              appid_pattern = r'applicationId\s+["\'][^"\']+["\']'
+              namespace_value = f"namespace '{package_id}'"
+              appid_value = f"applicationId '{package_id}'"
+
+          s = settings.read_text()
+          a = app.read_text()
+
+          if "com.google.gms.google-services" not in s:
+              s = s.replace("plugins {", "plugins {\n" + plugin_settings, 1)
+
+          if "com.google.gms.google-services" not in a:
+              a = a.replace("plugins {", "plugins {\n" + plugin_app, 1)
+
+          a, n1 = re.subn(namespace_pattern, namespace_value, a, count=1)
+          a, n2 = re.subn(appid_pattern, appid_value, a, count=1)
+
+          if n1 != 1 or n2 != 1:
+              raise SystemExit("Could not set Android namespace/applicationId")
+
+          settings.write_text(s)
+          app.write_text(a)
+
+          print("Firebase package:", firebase_package)
+          print("Android package:", package_id)
           PY
 
       - name: Install dependencies
