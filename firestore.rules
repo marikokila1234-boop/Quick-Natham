@@ -1,0 +1,18 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    match /users/{uid} {
+      allow read, create, update: if signedIn() && request.auth.uid == uid;
+    }
+    match /rides/{rideId} {
+      allow create: if signedIn()
+        && request.resource.data.customerUid == request.auth.uid
+        && request.resource.data.status == 'requested'
+        && request.resource.data.vehicleType in ['bike', 'auto'];
+      allow read: if signedIn() && (resource.data.customerUid == request.auth.uid || resource.data.driverUid == request.auth.uid);
+      allow update, delete: if false;
+    }
+    match /{document=**} { allow read, write: if false; }
+  }
+}
